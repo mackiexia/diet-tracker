@@ -220,13 +220,29 @@ function NutBar({label,val,max,unit,warnName}){
   );
 }
 
-function DayCard({summary,weightEntry,goalKcal,waterGoal,onExport,personalMarks=[]}){
+function DayCard({summary,weightEntry,goalKcal,waterGoal,onExport,onDeleteMeal,onUpdateWeight,personalMarks=[]}){
   const [meals,setMeals]=useState(null);
   const [open,setOpen]=useState(false);
   const toggle=async()=>{
     if(!open&&meals===null){const l=await S.get(`cal_logs_${summary.date}`);setMeals(l||[]);}
     setOpen(v=>!v);
   };
+  // Sugar grade computed once meals are loaded
+  const getSugarLabel=()=>{
+    if(!meals||meals.length===0) return null;
+    const score=meals.reduce((a,l)=>{
+      const hit=checkBL(l.name);
+      if(hit) return a+(hit.lv==="极危"?3:hit.lv==="高危"?2:1);
+      if(personalMarks.some(p=>p.n===l.name.replace(/\s×\d+$/,""))) return a+2;
+      if(l.isCombo||l.warn==="combo") return a+2;
+      return a;
+    },0);
+    if(score===0) return {label:"控糖优秀",color:"#3a8f5c",bg:"#E8F8F0",icon:"🌿"};
+    if(score<=2)  return {label:"基本达标",color:"#7A9E7E",bg:"#EDF7EE",icon:"👌"};
+    if(score<=4)  return {label:"注意含糖",color:"#E8963A",bg:"#FEF4E8",icon:"⚡"};
+    return          {label:"高糖警报", color:"#E05A5A",bg:"#FDECEA",icon:"🚨"};
+  };
+  const sugarLabel=getSugarLabel();
   const pct=Math.min(summary.kcal/goalKcal*100,100),over=summary.kcal>goalKcal;
   const d=new Date(summary.date+"T00:00:00");
   const label=d.toLocaleDateString("zh-CN",{month:"long",day:"numeric",weekday:"short"});
@@ -250,10 +266,12 @@ function DayCard({summary,weightEntry,goalKcal,waterGoal,onExport,personalMarks=
         <div style={{flex:1,cursor:"pointer"}} onClick={toggle}>
           <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
             <span style={{fontSize:13,fontWeight:700,color:C.navy}}>{label}</span>
-            {weightEntry&&<span style={{fontSize:11,background:C.greenL,color:C.green,borderRadius:8,padding:"2px 8px",fontWeight:600}}>⚖️ {weightEntry.weight}kg</span>}
+            {weightEntry&&<span style={{fontSize:11,background:C.greenL,color:C.green,borderRadius:8,padding:"2px 8px",fontWeight:600}}>⚖️ {weightEntry.weight} kg</span>}
           </div>
-          <div style={{fontSize:12,color:C.mid,marginTop:3}}>
-            {Math.round(summary.kcal)} kcal · 脂{summary.fat.toFixed(1)}g · 糖{summary.sug.toFixed(1)}g · 💧{summary.water}/{waterGoal}杯
+          <div style={{fontSize:12,color:C.mid,marginTop:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            <span>{Math.round(summary.kcal)} kcal</span>
+            {sugarLabel&&<span style={{background:sugarLabel.bg,color:sugarLabel.color,borderRadius:6,padding:"1px 6px",fontWeight:600,fontSize:11}}>{sugarLabel.icon}{sugarLabel.label}</span>}
+            <span style={{color:C.lite}}>💧{summary.water}/{waterGoal}杯</span>
           </div>
         </div>
         {/* Export button */}
@@ -276,8 +294,42 @@ function DayCard({summary,weightEntry,goalKcal,waterGoal,onExport,personalMarks=
                 <SugarTag name={l.name} personalMarks={personalMarks}/>
               </div>
               <span style={{color:C.mid,flexShrink:0}}>{Math.round(l.kcal)} kcal · {l.time}</span>
+              <button onClick={async()=>{
+                  const updated=meals.filter(x=>x.id!==l.id);
+                  setMeals(updated);
+                  await S.set(`cal_logs_${summary.date}`,updated);
+                  // update summary in dateIndex via onDeleteMeal
+                  onDeleteMeal&&onDeleteMeal(summary.date,updated);
+                }}
+                style={{border:"none",background:"none",color:C.lite,fontSize:18,
+                  cursor:"pointer",lineHeight:1,padding:"0 2px",flexShrink:0}}>×</button>
             </div>
           ))}
+          {/* Past weight entry */}
+          <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:12,color:C.mid,flexShrink:0}}>⚖️ 体重</span>
+            {weightEntry?(
+              <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
+                <span style={{fontSize:13,fontWeight:700,color:C.navy}}>{weightEntry.weight} kg</span>
+                <button onClick={()=>onUpdateWeight&&onUpdateWeight(summary.date,null)}
+                  style={{border:"none",background:"none",color:C.lite,fontSize:16,cursor:"pointer",lineHeight:1}}>×</button>
+              </div>
+            ):(
+              <div style={{display:"flex",gap:6,flex:1}}>
+                <input type="number" step="0.1" placeholder="补录体重 kg"
+                  id={`wt-${summary.date}`}
+                  style={{...inp,flex:1,padding:"6px 10px",fontSize:12}}/>
+                <button onClick={()=>{
+                    const v=parseFloat(document.getElementById(`wt-${summary.date}`)?.value);
+                    if(!isNaN(v)&&v>0){onUpdateWeight&&onUpdateWeight(summary.date,v);}
+                  }}
+                  style={{padding:"6px 12px",borderRadius:10,border:"none",background:C.pri,
+                    color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                  记录
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -285,13 +337,14 @@ function DayCard({summary,weightEntry,goalKcal,waterGoal,onExport,personalMarks=
 }
 
 /* ── SETTINGS TAB with editable food library ── */
-function SettingsTab({settings,onSave,userFoods,onDeleteFood,onUpdateFood,onClearFoods,onBatchImport,onResetLib}){
+function SettingsTab({settings,onSave,userFoods,onDeleteFood,onUpdateFood,onClearFoods,onBatchImport,onResetLib,onImport}){
   const [loc,setLoc]=useState(settings);
   const [showLib,setShowLib]=useState(false);
   const [editId,setEditId]=useState(null);
   const [ef,setEf]=useState({n:"",kcal:"",fat:"",sug:""});
   const [importText,setImportText]=useState("");
   const [showImport,setShowImport]=useState(false);
+  const [showExportLib,setShowExportLib]=useState(null);
   const [libSearch,setLibSearch]=useState("");
 
   const startEdit=f=>{ setEditId(f.id); setEf({n:f.n,kcal:String(f.kcal),fat:String(f.fat||0),sug:String(f.sug||0)}); };
@@ -365,6 +418,16 @@ function SettingsTab({settings,onSave,userFoods,onDeleteFood,onUpdateFood,onClea
                 background:C.priL,color:C.pri,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
               批量导入
             </button>
+            <button onClick={e=>{
+                e.stopPropagation();
+                const lines=userFoods.map(f=>f.totalOnly?`${f.n}：${f.kcal}/份`:`${f.n}：${(f.kcal/100).toFixed(2)}/g`);
+                const text=lines.join('\n');
+                setShowExportLib(text);
+              }}
+              style={{padding:"5px 11px",borderRadius:8,border:`1.5px solid ${C.border}`,
+                background:"none",color:C.mid,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              导出备份
+            </button>
             <div style={{width:28,height:28,borderRadius:8,background:C.priL,
               display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:C.pri}}>
               {showLib?"▲":"▼"}
@@ -378,8 +441,9 @@ function SettingsTab({settings,onSave,userFoods,onDeleteFood,onUpdateFood,onClea
               <div style={{marginBottom:12,padding:13,background:"#FAFAFE",borderRadius:12,border:`1px solid ${C.border}`}}>
                 <div style={{fontSize:13,fontWeight:700,color:C.navy,marginBottom:6}}>📋 批量导入卡路里备忘录</div>
                 <div style={{fontSize:11,color:C.mid,marginBottom:8,lineHeight:1.8}}>
-                  支持：<code style={{background:C.bg,padding:"1px 5px",borderRadius:3}}>名称：X/g</code>（每g热量）·
-                  <code style={{background:C.bg,padding:"1px 5px",borderRadius:3}}>名称：X/个</code>（按份）
+                  单位均为 <b style={{color:C.pri}}>kcal</b>（大卡）：<br/>
+                  <code style={{background:C.bg,padding:"1px 5px",borderRadius:3}}>名称：X/g</code> 每克热量（如 0.63/g）·
+                  <code style={{background:C.bg,padding:"1px 5px",borderRadius:3}}>名称：X/个</code> 每份热量（如 78/个）
                 </div>
                 <textarea value={importText} onChange={e=>setImportText(e.target.value)}
                   placeholder={"吾岛希腊酸奶：0.63/g\nbenn黑巧：22/块\n白煮蛋：78/个"}
@@ -444,6 +508,159 @@ function SettingsTab({settings,onSave,userFoods,onDeleteFood,onUpdateFood,onClea
           </>
         )}
       </div>
+
+      {/* Food library export modal */}
+      {showExportLib&&(
+        <div style={{background:C.white,borderRadius:22,padding:"18px 16px",margin:"10px 16px",boxShadow:C.shadow}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.navy}}>📋 食物库备份</div>
+            <button onClick={()=>setShowExportLib(null)}
+              style={{border:"none",background:"none",color:C.lite,fontSize:20,cursor:"pointer"}}>×</button>
+          </div>
+          <div style={{fontSize:12,color:C.mid,marginBottom:8}}>
+            全选复制后存到备忘录，下次粘贴进「批量导入」即可恢复
+          </div>
+          <textarea readOnly value={showExportLib}
+            ref={el=>{if(el){el.select();try{document.execCommand('copy');}catch{};}}}
+            style={{...inp,height:200,resize:"none",fontSize:12,fontFamily:"monospace",marginBottom:8}}/>
+          <button onClick={()=>{
+              const ta=document.querySelector('textarea[readonly]');
+              if(ta){ta.select();try{document.execCommand('copy');}catch{};}
+            }}
+            style={{width:"100%",padding:11,borderRadius:12,background:C.pri,color:"#fff",
+              border:"none",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            📋 全选复制
+          </button>
+        </div>
+      )}
+
+      {/* Backup Import */}
+      <BackupImport onImport={onImport}/>
+
+    </div>
+  );
+}
+
+/* ── BACKUP IMPORT ── */
+function BackupImport({onImport}){
+  const [text,setText]=useState("");
+  const [preview,setPreview]=useState(null); // {date, rows, error}
+  const [done,setDone]=useState(false);
+
+  const parseCSV=raw=>{
+    // Split lines, strip BOM and quotes
+    const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+    // Find date line: "日期：YYYY/MM/DD" or "日期：YYYY-MM-DD"
+    let date=null;
+    for(const l of lines){
+      const m=l.replace(/"/g,"").match(/日期[：:]\s*(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+      if(m){ date=`${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`; break; }
+    }
+    if(!date) return {error:"未找到日期行，请确认格式正确"};
+
+    // Find data rows: time col looks like HH:MM
+    const rows=[];
+    for(const l of lines){
+      const cols=l.split(",").map(c=>c.replace(/^"|"$/g,"").trim());
+      if(cols.length<4) continue;
+      const [time,name,qty,kcalStr]=cols;
+      if(!/^\d{1,2}:\d{2}$/.test(time)) continue;
+      const kcal=parseInt(kcalStr);
+      if(!name||isNaN(kcal)) continue;
+      // Parse qty: "24g"→weight=24, "1份"/"2份"→totalOnly
+      const gm=qty.match(/^([\d.]+)\s*(g|ml|克|毫升)$/i);
+      const pm=qty.match(/^([\d.]+)\s*份$/);
+      rows.push({
+        id:Date.now()+Math.random(),
+        name,
+        weight: gm ? +gm[1] : null,
+        kcal,
+        fat:0, sug:0,
+        isCombo:false, warn:null,
+        time,
+        _portions: pm ? +pm[1] : null,
+      });
+    }
+    if(rows.length===0) return {error:"未找到有效记录行，请检查格式"};
+    return {date, rows};
+  };
+
+  const handlePreview=()=>{
+    const result=parseCSV(text);
+    setPreview(result);
+    setDone(false);
+  };
+
+  const handleConfirm=()=>{
+    if(!preview||preview.error) return;
+    onImport(preview.date, preview.rows);
+    setDone(true);
+    setText(""); setPreview(null);
+  };
+
+  return(
+    <div style={{background:C.white,borderRadius:22,padding:"18px 16px",margin:"10px 16px",boxShadow:C.shadow}}>
+      <div style={{fontSize:14,fontWeight:700,color:C.navy,marginBottom:4}}>📥 导入备份记录</div>
+      <div style={{fontSize:12,color:C.mid,marginBottom:12}}>
+        将之前导出的 CSV 内容粘贴进来，自动恢复到对应日期
+      </div>
+
+      {done&&(
+        <div style={{background:C.greenL,borderRadius:10,padding:"10px 14px",marginBottom:10,fontSize:13,color:C.green,fontWeight:600}}>
+          ✓ 导入成功！
+        </div>
+      )}
+
+      <textarea value={text} onChange={e=>{setText(e.target.value);setPreview(null);setDone(false);}}
+        placeholder={"粘贴导出的 CSV 内容…\n\n例：\n\"减脂记录导出\"\n\"日期：2026/04/23\"\n\"时间\",\"食物名称\",\"用量\",\"热量(kcal)\",…\n\"12:45\",\"百醇饼干\",\"24g\",\"118\",…"}
+        style={{...inp,height:120,resize:"vertical",marginBottom:8,fontSize:12,fontFamily:"monospace"}}/>
+
+      {!preview&&(
+        <button onClick={handlePreview} disabled={!text.trim()}
+          style={{width:"100%",padding:11,borderRadius:12,fontSize:14,fontWeight:700,border:"none",
+            cursor:text.trim()?"pointer":"default",fontFamily:"inherit",
+            background:text.trim()?C.pri:C.border,color:text.trim()?"#fff":C.lite}}>
+          解析预览
+        </button>
+      )}
+
+      {preview&&!preview.error&&(
+        <div>
+          <div style={{background:C.priL,borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.pri,marginBottom:8}}>
+              📅 {preview.date} · {preview.rows.length} 条记录
+            </div>
+            {preview.rows.map((r,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,
+                color:C.navy,padding:"4px 0",borderBottom:`1px solid ${C.border}`}}>
+                <span style={{flex:1}}>{r.time} · {r.name}{r.weight?` · ${r.weight}g`:""}</span>
+                <span style={{fontWeight:600,flexShrink:0}}>{r.kcal} kcal</span>
+                <button onClick={()=>setPreview(p=>({...p,rows:p.rows.filter((_,j)=>j!==i)}))}
+                  style={{border:"none",background:"none",color:C.lite,fontSize:16,
+                    cursor:"pointer",lineHeight:1,padding:"0 2px",flexShrink:0}}>×</button>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={handleConfirm}
+              style={{flex:1,padding:11,borderRadius:12,fontSize:14,fontWeight:700,border:"none",
+                cursor:"pointer",fontFamily:"inherit",background:C.pri,color:"#fff"}}>
+              ✓ 确认导入
+            </button>
+            <button onClick={()=>{setPreview(null);}}
+              style={{padding:"11px 16px",borderRadius:12,fontSize:13,border:"none",
+                cursor:"pointer",fontFamily:"inherit",background:C.border,color:C.mid}}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {preview?.error&&(
+        <div style={{background:C.redL,borderRadius:10,padding:"10px 14px",fontSize:13,color:C.red}}>
+          ⚠️ {preview.error}
+        </div>
+      )}
     </div>
   );
 }
@@ -482,16 +699,8 @@ export default function App(){
   const [safeList,setSafeList]=useState([]);            // foods confirmed safe
   const [pendingClassify,setPendingClassify]=useState(null); // food name awaiting classification
   // Calendar state for history tab — Shanghai UTC+8
-  const shanghaiNow = () => {
-    const now = new Date();
-    const sh = new Date(now.getTime() + (8*60 - now.getTimezoneOffset())*60000);
-    return sh;
-  };
-  const shToday = () => {
-    const sh = shanghaiNow();
-    return `${sh.getUTCFullYear()}-${String(sh.getUTCMonth()+1).padStart(2,"0")}-${String(sh.getUTCDate()).padStart(2,"0")}`;
-  };
-  const initMonth = () => { const sh=shanghaiNow(); return `${sh.getUTCFullYear()}-${String(sh.getUTCMonth()+1).padStart(2,"0")}`; };
+  const shToday = () => todayKey();
+  const initMonth = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
   const [calMonth, setCalMonth] = useState(initMonth);
   const [calSelected, setCalSelected] = useState(null);
 
@@ -1193,7 +1402,7 @@ export default function App(){
               今日已喝 <b style={{color:C.green}}>{water}</b> / {settings.waterGoal} 杯水
             </p>
             <button onClick={()=>{setWater(w=>w+1);showToast("💧 已记录一杯水");}}
-              style={{background:C.green,color:"#fff",border:"none",borderRadius:14,
+              style={{background:"#0EA5E9",color:"#fff",border:"none",borderRadius:14,
                 padding:"12px 40px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
               💧 ＋ 一杯水
             </button>
@@ -1319,7 +1528,7 @@ export default function App(){
                   <DayCard summary={selectedSummary} personalMarks={personalMarks}
                     weightEntry={weightLogs.find(w=>w.date===calSelected)}
                     goalKcal={settings.goalKcal} waterGoal={settings.waterGoal}
-                    onExport={()=>exportDay(calSelected)} personalMarks={personalMarks} inline/>
+                    onExport={()=>exportDay(calSelected)} onUpdateWeight={(date,w)=>{setWeightLogs(prev=>w===null?prev.filter(x=>x.date!==date):[{id:Date.now(),date,weight:w},...prev.filter(x=>x.date!==date)].sort((a,b)=>b.date.localeCompare(a.date)));}} personalMarks={personalMarks} onDeleteMeal={(date,updated)=>{setDateIndex(prev=>prev.map(d=>d.date===date?{...d,kcal:updated.reduce((a,l)=>a+l.kcal,0)}:d));}} inline/>
                 ) : calSelected===todaySH ? (
                   <div style={{textAlign:"center",padding:"16px 0",color:C.mid,fontSize:13}}>
                     今日记录请在「今日」tab 查看
@@ -1384,7 +1593,7 @@ export default function App(){
               <DayCard key={s.date} summary={s}
                 weightEntry={weightLogs.find(w=>w.date===s.date)}
                 goalKcal={settings.goalKcal} waterGoal={settings.waterGoal}
-                onExport={()=>exportDay(s.date)} personalMarks={personalMarks}/>
+                onExport={()=>exportDay(s.date)} onUpdateWeight={(date,w)=>{setWeightLogs(prev=>w===null?prev.filter(x=>x.date!==date):[{id:Date.now(),date,weight:w},...prev.filter(x=>x.date!==date)].sort((a,b)=>b.date.localeCompare(a.date)));}} personalMarks={personalMarks} onDeleteMeal={(date,updated)=>{setDateIndex(prev=>prev.map(d=>d.date===date?{...d,kcal:updated.reduce((a,l)=>a+l.kcal,0)}:d));}}/>
             ))}
           </div>
         );
@@ -1413,6 +1622,23 @@ export default function App(){
               showToast(`✓ 已恢复 ${toAdd.length} 个内置食物`);
               return [...prev,...toAdd];
             });
+          }}
+          onImport={async(date, rows)=>{
+            // Merge with existing logs for that date (don't overwrite)
+            const existing = await S.get(`cal_logs_${date}`) || [];
+            const merged = [...existing, ...rows];
+            await S.set(`cal_logs_${date}`, merged);
+            // Update dateIndex
+            const kcal=merged.reduce((a,l)=>a+l.kcal,0);
+            const fat=merged.reduce((a,l)=>a+(l.fat||0),0);
+            const sug=merged.reduce((a,l)=>a+(l.sug||0),0);
+            setDateIndex(prev=>{
+              const rest=prev.filter(d=>d.date!==date);
+              return [{date,kcal,fat,sug,water:0},...rest].sort((a,b)=>b.date.localeCompare(a.date));
+            });
+            // If today, reload logs
+            if(date===dk){ setLogs(merged); }
+            showToast(`✓ 已导入 ${date} · ${rows.length} 条记录`);
           }}
         />
       )}
