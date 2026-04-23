@@ -296,7 +296,13 @@ function SettingsTab({settings,onSave,userFoods,onDeleteFood,onUpdateFood,onClea
 
   const startEdit=f=>{ setEditId(f.id); setEf({n:f.n,kcal:String(f.kcal),fat:String(f.fat||0),sug:String(f.sug||0)}); };
   const saveEdit=()=>{ onUpdateFood({id:editId,n:ef.n,kcal:+ef.kcal,fat:+ef.fat,sug:+ef.sug}); setEditId(null); };
-  const visibleFoods=libSearch?userFoods.filter(f=>f.n.includes(libSearch)):userFoods;
+  const libFuzzy=(name,q)=>{
+    const n=name.toLowerCase();
+    const terms=q.toLowerCase().trim().split(/\s+/);
+    if(terms.length===1) return [...terms[0]].every(ch=>n.includes(ch));
+    return terms.every(t=>n.includes(t));
+  };
+  const visibleFoods=libSearch?userFoods.filter(f=>libFuzzy(f.n,libSearch)):userFoods;
 
   const parseBatch=()=>{
     const lines=importText.split("\n").filter(l=>l.trim());
@@ -568,15 +574,11 @@ export default function App(){
   const fuzzyMatch = (name, q) => {
     if (!q) return false;
     const n = name.toLowerCase();
-    const terms = q.toLowerCase().replace(/\s+/g," ").trim().split(" ");
-    // If single term: every char must appear in order (subsequence)
+    const terms = q.toLowerCase().trim().split(/\s+/);
     if (terms.length === 1) {
-      const t = terms[0];
-      let i = 0;
-      for (const ch of n) { if (ch === t[i]) i++; if (i === t.length) return true; }
-      return false;
+      // All chars must appear in name, order-independent
+      return [...terms[0]].every(ch => n.includes(ch));
     }
-    // Multiple words: each word must be a substring
     return terms.every(t => n.includes(t));
   };
   const sugg = query.length >= 1
