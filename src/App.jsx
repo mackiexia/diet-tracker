@@ -686,19 +686,28 @@ export default function App(){
     const d = new Date(dateStr + "T00:00:00");
     const label = d.toLocaleDateString("zh-CN", {year:"numeric",month:"2-digit",day:"2-digit"});
 
+    const getSugarMark = (name) => {
+      const hit = checkBL(name);
+      if (hit) return hit.lv;
+      if (personalMarks.some(p=>p.n===name.replace(/\s×\d+$/,""))) return "⚠️注意";
+      return "";
+    };
+
+    const getQty = (l) => {
+      if (l.weight) return `${l.weight}g`;
+      const m = l.name.match(/×(\d+\.?\d*)$/);
+      return m ? `${m[1]}份` : "1份";
+    };
+
     const header = [["减脂记录导出"], [`日期：${label}`], []];
-    const colHead = [["时间","食物名称","重量(g)","热量(kcal)","脂肪(g)","糖分(g)","备注"]];
+    const colHead = [["时间","食物名称","用量","热量(kcal)","控糖标记"]];
     const mealRows = meals.map(l => [
-      l.time, l.name, l.weight ?? "—", Math.round(l.kcal),
-      l.fat.toFixed(1), l.sug.toFixed(1),
-      l.isCombo ? "糖油" : l.warn === "fat" ? "高脂" : l.warn === "sug" ? "高糖" : "",
+      l.time, l.name.replace(/\s×\d+\.?\d*$/,""), getQty(l), Math.round(l.kcal), getSugarMark(l.name),
     ]);
-    const blank = [["","","","","","",""]];
+    const blank = [["","","","",""]];
     const total = [["【当日合计】","","",
-      summary ? Math.round(summary.kcal) : meals.reduce((a,l)=>a+l.kcal,0).toFixed(0),
-      summary ? summary.fat.toFixed(1) : "—",
-      summary ? summary.sug.toFixed(1) : "—",
-      wEntry ? `体重：${wEntry.weight} kg` : "",
+      summary ? Math.round(summary.kcal) : meals.reduce((a,l)=>a+l.kcal,0),
+      wEntry ? `体重 ${wEntry.weight} kg` : "",
     ]];
     const csv = buildCSV([...header, ...colHead, ...mealRows, ...blank, ...total]);
     showExport(`${label} 饮食记录`, csv);
@@ -706,24 +715,38 @@ export default function App(){
 
   const exportAll = async () => {
     if (dateIndex.length === 0) { showToast("暂无历史记录可导出"); return; }
+
+    const getSugarMark = (name) => {
+      const hit = checkBL(name);
+      if (hit) return hit.lv;
+      if (personalMarks.some(p=>p.n===name.replace(/\s×\d+$/,""))) return "⚠️注意";
+      return "";
+    };
+
     const header = [["减脂记录 · 全部历史"], [`导出时间：${new Date().toLocaleString("zh-CN")}`], []];
-    const colHead = [["日期","时间","食物名称","重量(g)","热量(kcal)","脂肪(g)","糖分(g)","当日合计kcal","当日体重kg","备注"]];
+    const colHead = [["日期","时间","食物名称","用量","热量(kcal)","控糖标记","当日合计kcal","当日体重kg"]];
     const allRows = [];
     for (const s of dateIndex) {
       const meals = await S.get(`cal_logs_${s.date}`) || [];
       const wEntry = weightLogs.find(w => w.date === s.date);
       const d = new Date(s.date + "T00:00:00");
       const dateLabel = d.toLocaleDateString("zh-CN",{year:"numeric",month:"2-digit",day:"2-digit"});
+      const getQty = (l) => {
+        if (l.weight) return `${l.weight}g`;
+        const m = l.name.match(/×(\d+\.?\d*)$/);
+        return m ? `${m[1]}份` : "1份";
+      };
       meals.forEach((l, i) => {
         allRows.push([
-          i===0?dateLabel:"", l.time, l.name, l.weight??"—", Math.round(l.kcal),
-          l.fat.toFixed(1), l.sug.toFixed(1),
+          i===0?dateLabel:"", l.time,
+          l.name.replace(/\s×\d+\.?\d*$/,""),
+          getQty(l), Math.round(l.kcal),
+          getSugarMark(l.name),
           i===0?Math.round(s.kcal):"", i===0&&wEntry?wEntry.weight:"",
-          l.isCombo?"糖油":l.warn==="fat"?"高脂":l.warn==="sug"?"高糖":"",
         ]);
       });
-      if (meals.length===0) allRows.push([dateLabel,"—","—","—","—","—","—",Math.round(s.kcal),wEntry?.weight||"",""]);
-      allRows.push(Array(10).fill(""));
+      if (meals.length===0) allRows.push([dateLabel,"—","—","—","—","",Math.round(s.kcal),wEntry?.weight||""]);
+      allRows.push(Array(8).fill(""));
     }
     const csv = buildCSV([...header, ...colHead, ...allRows]);
     showExport(`全部历史记录（${dateIndex.length} 天）`, csv);
