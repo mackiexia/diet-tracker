@@ -1146,7 +1146,7 @@ export default function App(){
               {/* Mini progress bar */}
               <div style={{height:6,background:C.border,borderRadius:3,overflow:"hidden",marginBottom:10}}>
                 <div style={{height:"100%",borderRadius:3,transition:"width .4s ease",
-                  background:water>=settings.waterGoal?C.green:C.pri,
+                  background:water>=settings.waterGoal?"#0EA5E9":"#0EA5E9",
                   width:`${Math.min(water/settings.waterGoal*100,100)}%`}}/>
               </div>
               {/* +1 / −1 controls */}
@@ -1158,7 +1158,7 @@ export default function App(){
                 <span style={{fontSize:20}}>{water>=settings.waterGoal?"🎉":"💧"}</span>
                 <button onClick={()=>{if(water<settings.waterGoal*2)setWater(w=>w+1);showToast("💧 +1 杯水");}}
                   style={{width:32,height:32,borderRadius:8,border:"none",
-                    background:C.pri,fontSize:18,cursor:"pointer",color:"#fff",fontFamily:"inherit",
+                    background:"#0EA5E9",fontSize:18,cursor:"pointer",color:"#fff",fontFamily:"inherit",
                     display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>＋</button>
               </div>
             </div>
