@@ -1412,12 +1412,15 @@ export default function App(){
 
       {/* ═══ HISTORY ═══ */}
       {tab==="history"&&(()=>{
+        // weightLogs is sorted desc by date (newest first)
+        // Latest = today's or most recent weight
+        // Previous = the one before latest that has a record
         const todaySH = shToday();
+        const latestLog = weightLogs[0] || null;
+        const prevLog = weightLogs.length>=2 ? weightLogs[1] : null;
+        const trendDiff = (latestLog&&prevLog) ? (latestLog.weight-prevLog.weight).toFixed(1) : null;
+        const trendGood = trendDiff!==null && trendDiff < 0;
         const pastDays = dateIndex.filter(d=>d.date!==todaySH);
-        const trendFirst = weightLogs.length>=2 ? weightLogs[weightLogs.length-1] : null;
-        const trendLast  = weightLogs.length>=2 ? weightLogs[0] : null;
-        const trendDiff  = trendFirst ? (trendLast.weight-trendFirst.weight).toFixed(1) : null;
-        const trendGood  = trendDiff < 0;
 
         // Calendar helpers
         const [calY, calM] = calMonth.split("-").map(Number);
@@ -1542,19 +1545,20 @@ export default function App(){
             )}
 
             {/* ── Weight trend ── */}
-            {trendFirst&&(
+            {latestLog&&prevLog&&(
               <div style={{...card,display:"flex",gap:14,alignItems:"center"}}>
                 <div style={{width:48,height:48,borderRadius:14,background:trendGood?C.greenL:C.redL,
                   display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>⚖️</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:700,color:C.navy}}>体重变化趋势</div>
                   <div style={{fontSize:13,color:C.mid,marginTop:3}}>
-                    {trendFirst.weight} → {trendLast.weight} kg
+                    <span style={{color:C.lite,fontSize:11}}>{prevLog.date}</span>
+                    {" "}{prevLog.weight} → {latestLog.weight} kg
                     <span style={{marginLeft:8,fontWeight:700,color:trendGood?C.green:C.red}}>
                       {trendGood?`↓ ${Math.abs(trendDiff)} kg`:`↑ ${trendDiff} kg`}
                     </span>
                   </div>
-                  {settings.weightGoal&&<div style={{fontSize:11,color:C.lite,marginTop:2}}>目标 {settings.weightGoal} kg · 距目标 {(trendLast.weight-settings.weightGoal).toFixed(1)} kg</div>}
+                  {settings.weightGoal&&<div style={{fontSize:11,color:C.lite,marginTop:2}}>目标 {settings.weightGoal} kg · 距目标 {(latestLog.weight-settings.weightGoal).toFixed(1)} kg</div>}
                 </div>
               </div>
             )}
